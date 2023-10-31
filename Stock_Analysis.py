@@ -32,9 +32,10 @@ URL_YEARLY_INCOME_STATEMENT = "/financials/annual/income-statement"
 URL_YEARLY_BALANCE_SHEET = "/financials/balance-sheet?countrycode=pe"
 URL_YEARLY_CASH_FLOW = "/financials/cash-flow?countrycode=pe"
 
-URL_QUARTERLY_INCOME_STATEMENT = "/financials/income/quarter?countrycode=pe"
-URL_QUARTERLY_BALANCE_SHEET = "/financials/balance-sheet/quarter?countrycode=pe"
-URL_QUARTERLY_CASH_FLOW = "/financials/cash-flow/quarter?countrycode=pe"
+URL_QUARTERLY_INCOME_STATEMENT = "/financials/quarter/income-statement"
+URL_QUARTERLY_BALANCE_SHEET = "/financials/quarter/balance-sheet"
+URL_QUARTERLY_CASH_FLOW = "/financials/quarter/cash-flow"
+
 
 pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
@@ -100,11 +101,12 @@ def get_ticker_list():
     return list
 
 
-def read_measure(column):
+def read_measure_currency(column):
     thousands = "Thousands"
     millions = "Millions"
     billions = "Billions"
     measure = ""
+    currency = ""
 
     if column.find(billions) != -1:
         measure = "B"
@@ -113,7 +115,12 @@ def read_measure(column):
     elif column.find(thousands) != -1:
         measure = "K"  
 
-    return measure
+    if column.find("PEN") != -1:
+        currency = "PEN"
+    else:
+        currency = "USD"
+
+    return measure, currency
 
 
 def clean_numeric_column(variable): 
@@ -162,18 +169,32 @@ def create_insert_script(item, year, quarter, value, stock, table_name):
     return query
 
 
-def get_financial_data_from_web(list_ticker, link_financia_data, type_financial_data):    
+def rename_quarterly_column_name(list_column):
+    dict_month = {"MAR": "1T", "JUN": "2T", "SEP": "3T", "DEC": "4T"}
+    new_list_column = ["Item"]
+    list_column = list_column[1:]
+
+    for item in list_column:
+        new_list_column.append(dict_month[item[3:6].upper()] + item[-4:])
+
+    return new_list_column
+
+
+def get_financial_data_from_web(list_ticker, 
+                                link_financial_data, 
+                                type_financial_data, 
+                                quarterly_data):    
     dataframes = []
     stock_data = pd.DataFrame()
     currency = ""
-    ticker_income_statement = {}
+    measure = ""
     index = 1
     total_stocks = len(list_ticker)
     result = False
     print("\nGetting {} from the web...".format(type_financial_data))
 
     for ticker in list_ticker:
-        tempURL = URL_DATA_SOURCE + ticker + link_financia_data
+        tempURL = URL_DATA_SOURCE + ticker + link_financial_data
         agent = random.choice(userAgentList)
         headers = {'User-Agent': agent}
         page = requests.get(f"{tempURL}", headers=headers, proxies = {"http": next(proxyPool)})
@@ -183,32 +204,40 @@ def get_financial_data_from_web(list_ticker, link_financia_data, type_financial_
         try:
             tables = pd.read_html(page.text)
             table = tables[0]
-            #table["Item  Item"] = table["Item  Item"].apply(lambda x: x[:round(len(x)/2)])
-            table = table.drop(columns=["5-year trend"])
             list_columns = table.columns
+            #table["Item  Item"] = table["Item  Item"].apply(lambda x: x[:round(len(x)/2)])
+            table = table.drop(columns=list_columns[-1])
             
-            currency = list_columns[0]
-            if currency.find("PEN") != -1:
-                currency = "PEN"
-            else:
-                currency = "USD"
-
-            measure = read_measure(list_columns[0])
+            if quarterly_data == True:
+                table = table.drop(columns=list_columns[-2])
+            
+            list_columns = table.columns
+            measure, currency = read_measure_currency(list_columns[0])
             table[list_columns[0]] = table[list_columns[0]].replace(np.nan, "DELETE")
-            table = table.loc[table[list_columns[0]] != "DELETE"]     
-            table[list_columns[1]] = table[list_columns[1]] + measure
-            table[list_columns[2]] = table[list_columns[2]] + measure
-            table[list_columns[3]] = table[list_columns[3]] + measure
-            table[list_columns[4]] = table[list_columns[4]] + measure
-            table[list_columns[5]] = table[list_columns[5]] + measure
-            unpivot_df = pd.melt(table, id_vars=list_columns[0], value_vars=list_columns[1:6])
+            table = table.loc[table[list_columns[0]] != "DELETE"]
+            
+            for item in list_columns[1:]:
+                table[item] = table[item] + measure
+                table[item] = table[item].apply(clean_numeric_column)
+                
+            if quarterly_data == True:
+                list_columns = rename_quarterly_column_name(list_columns)
+                table.columns = list_columns
+                table["0TTM "] = table[list_columns[1]] + table[list_columns[2]] + table[list_columns[3]] + table[list_columns[4]]
+                list_columns = table.columns
+
+            unpivot_df = pd.melt(table, id_vars=list_columns[0], value_vars=list_columns[1:])
             unpivot_df.columns = ["Item", "Year", "Value"]
             unpivot_df["Stock"] = ticker.upper()
             unpivot_df["Quarter"] = 0
             unpivot_df["Currency"] = currency
+
+            if quarterly_data == True:
+                unpivot_df["Quarter"] = unpivot_df["Year"].apply(lambda x: x[0])
+                unpivot_df["Year"] = unpivot_df["Year"].apply(lambda x: x[-4:])
+            
             dataframes.append(unpivot_df)
-            #ticker_income_statement[ticker] = table
-            #print(ticker_income_statement[ticker])
+                
             #print(table)
             #print("Ticker: \n", unpivot_df)            
         except:
@@ -218,12 +247,10 @@ def get_financial_data_from_web(list_ticker, link_financia_data, type_financial_
 
     stock_data = pd.concat(dataframes)
     stock_data.columns = ["Item", "Year", "Value", "Stock", "Quarter", "Currency"]
-    stock_data["Value"] = stock_data["Value"].apply(clean_numeric_column)
+    #stock_data["Value"] = stock_data["Value"].apply(clean_numeric_column)
     stock_data = stock_data.reset_index()
     stock_data = stock_data.drop(columns=["index"])
     result = True
-    #print(stock_data)
-    #print(stock_data.columns)
 
     return stock_data, result
 
@@ -255,7 +282,7 @@ def load_database_snowflake(account,
     script_temp = "INSERT INTO BVL_INCOME_STATEMENT VALUES "
     
     for index, row in df_temp.iterrows():
-        script_temp += " ('{}', '{}', {}, {}, {}, '{}')".format(row["Stock"], row["Item"], row["Year"], row["Quarter"], row["Value"], row["Currency"])
+        script_temp += " ('{}', '{}', '{}', '{}', {}, '{}')".format(row["Stock"], row["Item"], row["Year"], row["Quarter"], row["Value"], row["Currency"])
         print(f"Generating script: row {count} out of {total_rows}")
         
         if (count == total_rows):
@@ -274,6 +301,7 @@ def load_database_snowflake(account,
 ###--->>> Execution code
 list_tickers = []
 df_income_statement = pd.DataFrame()
+df_income_statement_quarterly = pd.DataFrame()
 df_balance_sheet = pd.DataFrame()
 df_cash_flow = pd.DataFrame()
 
@@ -285,7 +313,19 @@ list_ticker_massive = ["alicorc1", "backusi1"]
 list_ticker_energy = ["lusurc1", "engepec1", "endispc1", "hidra2c1"]
 list_tickers = list_ticker_agro + list_ticker_industrial + list_ticker_mining + list_ticker_massive + list_ticker_energy
 
-df_income_statement, result = get_financial_data_from_web(list_tickers, URL_YEARLY_INCOME_STATEMENT, "INCOME STATEMENT")
+df_income_statement, result = get_financial_data_from_web(
+    list_tickers, 
+    URL_YEARLY_INCOME_STATEMENT, 
+    "INCOME STATEMENT",
+    False)
+
+result = False
+df_income_statement_quarterly, result = get_financial_data_from_web(
+    list_tickers,
+    URL_QUARTERLY_INCOME_STATEMENT,
+    "INCOME STATEMENTE",
+    True)
+
 #df_balance_sheet = get_financial_data_from_web(list_tickers, URL_YEARLY_BALANCE_SHEET, "BALANCE SHEET")
 #df_cash_flow = get_financial_data_from_web(list_tickers, URL_YEARLY_CASH_FLOW, "CASH FLOW")
 
@@ -298,5 +338,14 @@ if (result == True):
                             "PYTHON_PROJECTS",
                             "ACCOUNTADMIN",
                             df_income_statement)
+    
+    load_database_snowflake("wtynwlj-nn04581",
+                            "PYTHON_USER",
+                            "Python2023",
+                            "TEST_DB",
+                            "PUBLIC",
+                            "PYTHON_PROJECTS",
+                            "ACCOUNTADMIN",
+                            df_income_statement_quarterly)
 
 
