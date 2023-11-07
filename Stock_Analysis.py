@@ -199,14 +199,24 @@ def process_financial_data(table,
     list_columns = table.columns
     
     #1. drop unnecessary columnsprint("step 1")
-    print("step 1")
+    #print("step 1")
     table = table.drop(columns=list_columns[-1])
     
     if quarterly_data == True:
         table = table.drop(columns=list_columns[-2])
 
     #2. drop rows without valid data (NaN) and unnecessary rows       
-    print("step 2")
+    #print("step 2")
+    drop_rows_cash_flow = ["Net Operating Cash Flow Growth",
+                           "Net Operating Cash Flow / Sales",
+                           "Capital Expenditures Growth",
+                           "Capital Expenditures / Sales",
+                           "Net Investing Cash Flow Growth",
+                           "Net Investing Cash Flow / Sales",
+                           "Net Financing Cash Flow Growth",
+                           "Net Financing Cash Flow / Sales",
+                           "Free Cash Flow Growth",
+                           "Free Cash Flow Yield"]
     drop_rows_balance_sheet = ["Cash & Short Term Investments Growth",
                  "Cash & ST Investments / Total Assets",
                  "Accounts Receivable Growth",
@@ -235,30 +245,37 @@ def process_financial_data(table,
     list_columns = table.columns
     measure, currency = read_measure_currency(list_columns[0]) 
     table[list_columns[0]] = table[list_columns[0]].replace(np.nan, "DELETE")
+    #table[list_columns[0]] = table[list_columns[0]].replace("'", "")
     table[list_columns[0]] = table[list_columns[0]].apply(lambda x: "DELETE" if x.find("Growth") != -1 else x)
     table[list_columns[0]] = table[list_columns[0]].apply(lambda x: "DELETE" if x in drop_rows_balance_sheet else x)
+    table[list_columns[0]] = table[list_columns[0]].apply(lambda x: "DELETE" if x in drop_rows_cash_flow else x)
     table = table.loc[table[list_columns[0]] != "DELETE"]
     
     #3. format numeric columns 
-    print("step 3")       
+    #print("step 3")       
     for item in list_columns[1:]:                
         table[item] = table[item].replace(np.nan, "0")
         table[item] = table[item] + measure
         table[item] = table[item].apply(clean_numeric_column)   
            
     #4. rename columns
-    print("step 4") 
+    #print("step 4") 
     if quarterly_data == True:
         list_columns = rename_quarterly_column_name(list_columns)
         table.columns = list_columns
-        table["0TTM "] = table[list_columns[1]] + table[list_columns[2]] + table[list_columns[3]] + table[list_columns[4]]
+
+        if type_data == "IS":
+            table["0TTM "] = table[list_columns[1]] + table[list_columns[2]] + table[list_columns[3]] + table[list_columns[4]]
+        else:
+            table["0TTM "] = table[list_columns[1]]
+        
         list_columns = table.columns
     else:
         list_columns = rename_yearly_column_name(list_columns)
         table.columns = list_columns
 
     #5. correct data related to Income Statement
-    print("step 5")  
+    #print("step 5")  
     if type_data == "IS":
         table = table.set_index("Item")
 
@@ -281,6 +298,7 @@ def get_financial_data_from_web(list_ticker,
                                 quarterly_data,
                                 type_data):    
     dataframes = []
+    df_indexes = []
     stock_data = pd.DataFrame()
     currency = ""
     measure = ""
@@ -295,8 +313,9 @@ def get_financial_data_from_web(list_ticker,
         headers = {'User-Agent': agent}
         page = requests.get(f"{tempURL}", headers=headers, proxies = {"http": next(proxyPool)})
         print("Stock {} out of {}: {}".format(index, total_stocks, ticker))
-        print(tempURL)
+        #print(tempURL)
         index += 1
+        df_indexes = []
         
         try:
             tables = pd.read_html(page.text)
@@ -304,80 +323,33 @@ def get_financial_data_from_web(list_ticker,
             list_columns = table.columns
             index_table = 0
 
-            table, currency, list_columns = process_financial_data(table, 
+            for item in tables:
+                if len(item) > 20:
+                    df_indexes.append(index_table)
+                
+                index_table += 1
+
+            table, currency, list_columns = process_financial_data(tables[df_indexes[0]], 
                                                      quarterly_data, 
                                                      type_data)
             
-            index_balance_sheet_liab_equity_yearly = 45
-            index_balance_sheet_liab_equity_quarterly = 37
-
             if type_data == "BS":
-                if quarterly_data == True:
-                    index_table = index_balance_sheet_liab_equity_quarterly
-                else:
-                    index_table = index_balance_sheet_liab_equity_yearly
-
-                table_ = tables[index_table]
+                table_ = tables[df_indexes[1]]
                 table_, currency, list_columns = process_financial_data(table_,
                                                 quarterly_data, 
                                                 type_data)
                 frames = [table, table_]
                 table = pd.concat(frames)
             
-              
             #table["Item  Item"] = table["Item  Item"].apply(lambda x: x[:round(len(x)/2)])
-            """ table = table.drop(columns=list_columns[-1])
-            print("step 1")
-
-            if quarterly_data == True:
-                table = table.drop(columns=list_columns[-2])
-            
-            list_columns = table.columns
-            measure, currency = read_measure_currency(list_columns[0])
-            table[list_columns[0]] = table[list_columns[0]].replace(np.nan, "DELETE")
-            table[list_columns[0]] = table[list_columns[0]].apply(lambda x: "DELETE" if x.find("Growth") != -1 else x)
-            table = table.loc[table[list_columns[0]] != "DELETE"]
-            print("step 2")
-            
-            for item in list_columns[1:]:                
-                table[item] = table[item].replace(np.nan, "0")
-                table[item] = table[item] + measure
-                table[item] = table[item].apply(clean_numeric_column)   
-            
-            print("step 3")
-            if quarterly_data == True:
-                list_columns = rename_quarterly_column_name(list_columns)
-                table.columns = list_columns
-                table["0TTM "] = table[list_columns[1]] + table[list_columns[2]] + table[list_columns[3]] + table[list_columns[4]]
-                list_columns = table.columns
-            else:
-                list_columns = rename_yearly_column_name(list_columns)
-                table.columns = list_columns
-          
-            print("step 4")
-            if is_income_statement == True:
-                table = table.set_index("Item")
-
-                if quarterly_data == True:
-                    table.loc["Basic Shares Outstanding", list_columns[-1]] = table.loc["Basic Shares Outstanding", list_columns[1]]
-                    table.loc["Diluted Shares Outstanding", list_columns[-1]] = table.loc["Diluted Shares Outstanding", list_columns[1]]
-            
-                print("step 4.1")
-                table = table.transpose()
-                table["EPS (Basic)"] = table["Net Income"] / table["Basic Shares Outstanding"]
-                table["EPS (Diluted)"] = table["Net Income"] / table["Diluted Shares Outstanding"]
-                table = table.transpose()
-                table = table.reset_index()
-                 """
-            
-            print("step 6")
+            #print("step 6")
             unpivot_df = pd.melt(table, id_vars=list_columns[0], value_vars=list_columns[1:])
             unpivot_df.columns = ["Item", "Year", "Value"]
             unpivot_df["Stock"] = ticker.upper()
             unpivot_df["Quarter"] = 0
             unpivot_df["Currency"] = currency
 
-            print("step 7")
+            #print("step 7")
             if quarterly_data == True:
                 unpivot_df["Quarter"] = unpivot_df["Year"].apply(lambda x: x[0])
                 unpivot_df["Year"] = unpivot_df["Year"].apply(lambda x: x[-4:])
@@ -409,14 +381,14 @@ def load_database_snowflake(account,
                             schema,
                             warehouse,
                             role,
-                            df_temp):
+                            df_temp,
+                            table_name):
     conn = snowflake.connector.connect(user=user,
                                        account=account,
                                        password=password,
                                        role=role)
     conn.cursor().execute(f"USE DATABASE {database}")
     conn.cursor().execute(f"USE SCHEMA {schema}")
-    table_name = "BVL_INCOME_STATEMENT"
     table_column = []
     table_schema = ""
     list_scripts = []
@@ -425,11 +397,12 @@ def load_database_snowflake(account,
     count = 1
 
     print("\nLoading data into Snowflake database: ")
-    script_temp = "INSERT INTO BVL_INCOME_STATEMENT VALUES "
+    script_temp = "INSERT INTO {} VALUES ".format(table_name)
     
     for index, row in df_temp.iterrows():
-        script_temp += " ('{}', '{}', '{}', '{}', {}, '{}')".format(row["Stock"], row["Item"], row["Year"], row["Quarter"], row["Value"], row["Currency"])
-        print(f"Generating script: row {count} out of {total_rows}")
+        item_value = row["Item"].replace("'", "")
+        script_temp += " ('{}', '{}', '{}', '{}', {}, '{}')".format(row["Stock"], item_value, row["Year"], row["Quarter"], row["Value"], row["Currency"])
+        #print(f"Generating script: row {count} out of {total_rows}")
         
         if (count == total_rows):
             script_temp += ";"
@@ -437,11 +410,13 @@ def load_database_snowflake(account,
             script_temp += ", "
 
         count += 1
-
+    
+    print(f"Total rows: {total_rows}")
     #print(script_temp)
     conn.cursor().execute(script_temp)
     print("Data successfully transfered into database...!!!")
     conn.close()
+
 
 
 ###--->>> Execution code
@@ -449,7 +424,9 @@ list_tickers = []
 df_income_statement = pd.DataFrame()
 df_income_statement_quarterly = pd.DataFrame()
 df_balance_sheet = pd.DataFrame()
+df_balance_sheet_quarterly = pd.DataFrame()
 df_cash_flow = pd.DataFrame()
+df_cash_flow_quarterly = pd.DataFrame()
 
 #list_tickers = get_ticker_list()
 list_ticker_agro = ["casagrc1", "cartavc1", "laredoc1"]
@@ -462,58 +439,93 @@ list_tickers = list_ticker_agro + list_ticker_industrial #+ list_ticker_mining +
 #list_tickers = list_ticker_mining + list_ticker_massive
 #list_tickers = list_ticker_utilities
 #list_tickers = list_ticker_finance
-list_tickers = ["casagrc1"]
-
-df_income_statement, result = get_financial_data_from_web(
-    list_tickers, 
-    URL_YEARLY_INCOME_STATEMENT, 
-    "YEARLY INCOME STATEMENT",
-    False,
-    "IS")
-
-result = False
-df_income_statement_quarterly, result = get_financial_data_from_web(
-    list_tickers,
-    URL_QUARTERLY_INCOME_STATEMENT,
-    "QUARTERLY INCOME STATEMENTE",
-    True,
-    "IS")
-
-df_balance_sheet, result = get_financial_data_from_web(
-    list_tickers,
-    URL_YEARLY_BALANCE_SHEET,
-    "YEARLY BALANCE SHEET",
-    False,
-    "BS")
-
-df_balance_sheet, result = get_financial_data_from_web(
-    list_tickers,
-    URL_QUARTERLY_BALANCE_SHEET,
-    "QUARTERLY BALANCE SHEET",
-    True,
-    "BS")
-#df_balance_sheet = get_financial_data_from_web(list_tickers, URL_YEARLY_BALANCE_SHEET, "BALANCE SHEET")
-#df_cash_flow = get_financial_data_from_web(list_tickers, URL_YEARLY_CASH_FLOW, "CASH FLOW")
+#list_tickers = ["siderc1"]
+dict_company_category = {"1": list_ticker_agro, 
+                         "2": list_ticker_industrial,
+                         "3": list_ticker_mining,
+                         "4": list_ticker_massive,
+                         "5": list_ticker_utilities,
+                         "6": list_ticker_finance}
 
 
-""" if (result == True):
-    load_database_snowflake("wtynwlj-nn04581",
-                            "PYTHON_USER",
-                            "Python2023",
-                            "TEST_DB",
-                            "PUBLIC",
-                            "PYTHON_PROJECTS",
-                            "ACCOUNTADMIN",
-                            df_income_statement)
+option = ""
+table_name = ""
+
+while (option != "X"):
+    print("\nSELECT INDUSTRY OF THE COMPANIES: ")
+    print("[1] Agro")
+    print("[2] Industrial")
+    print("[3] Mining")
+    print("[4] Massive Consumption")
+    print("[5] Utilitiees")
+    print("[6] Finance")
+    print("[X] Exit")
+    option = input("Enter category: ")
+
+    if option == "X":
+        break
     
-    load_database_snowflake("wtynwlj-nn04581",
-                            "PYTHON_USER",
-                            "Python2023",
-                            "TEST_DB",
-                            "PUBLIC",
-                            "PYTHON_PROJECTS",
-                            "ACCOUNTADMIN",
-                            df_income_statement_quarterly)
+    list_tickers = dict_company_category[option]
+    print(list_tickers)
+    print("\nSELECT TYPE OF FINANCIAL DATA: ")
+    print("[1] Income Statement")
+    print("[2] Balance Sheet")
+    print("[3] Cash Flow")
+    print("[X] Go back to company industries")
+    option = input("Enter type of data: ")
+
+    if option == "X":
+        option = ""
+        continue
+
+    if option == "1":
+        url_yearly_data = URL_YEARLY_INCOME_STATEMENT
+        url_quarterly_data = URL_QUARTERLY_INCOME_STATEMENT
+        data_type_descrition = "INCOME STATEMENT"
+        data_type_short = "IS"
+        table_name = "BVL_INCOME_STATEMENT"
+    elif option == "2":
+        url_yearly_data = URL_YEARLY_BALANCE_SHEET
+        url_quarterly_data = URL_QUARTERLY_BALANCE_SHEET
+        data_type_descrition = "BALANCE SHEET"
+        data_type_short = "BS"
+        table_name = "BVL_BALANCE_SHEET"
+    elif option == "3":
+        url_yearly_data = URL_YEARLY_CASH_FLOW
+        url_quarterly_data = URL_QUARTERLY_CASH_FLOW
+        data_type_descrition = "CASH FLOW"
+        data_type_short = "CF"
+        table_name = "BVL_CASH_FLOW"
+    
+    df_data_yearly, result = get_financial_data_from_web(
+        list_tickers,
+        url_yearly_data,
+        "YEARLY " + data_type_descrition,
+        False,
+        data_type_short)
+
+    df_data_quarterly, result = get_financial_data_from_web(
+        list_tickers,
+        url_quarterly_data,
+        "QUARTERLY " + data_type_descrition,
+        True,
+        data_type_short)
+    
+    frames = [df_data_yearly, df_data_quarterly]
+    df_total_data = pd.concat(frames)
+    option = ""
+    
+    if (result == True):
+        load_database_snowflake("wtynwlj-nn04581",
+                                "PYTHON_USER",
+                                "Python2023",
+                                "TEST_DB",
+                                "PUBLIC",
+                                "PYTHON_PROJECTS",
+                                "ACCOUNTADMIN",
+                                df_total_data,
+                                table_name)
 
 
-   """
+    
+
