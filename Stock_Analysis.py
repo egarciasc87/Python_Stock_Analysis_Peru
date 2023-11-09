@@ -207,6 +207,24 @@ def process_financial_data(table,
 
     #2. drop rows without valid data (NaN) and unnecessary rows       
     #print("step 2")
+    drop_rows_income_statement = ['COGS excluding D&A', 
+                                  'Depreciation', 
+                                  'Amortization of Intangibles',
+                                  'SG&A Expense', 'Other SG&A', 
+                                  'Other Operating Expense', 
+                                  'EBIT', 
+                                  'Unusual Expense', 
+                                  'Non Operating Income/Expense',
+                                  'Non-Operating Interest Income', 
+                                  'Gross Interest Expense', 
+                                  'Income Tax - Current Domestic',
+                                  'Income Tax - Deferred Domestic', 
+                                  'Equity in Affiliates', 
+                                  'Discontinued Operations',
+                                  'Net Income After Extraordinaries', 
+                                  'Net Income Available to Common', 
+                                  'Pretax Income',
+                                  'Extraordinaries & Discontinued Operations']
     drop_rows_cash_flow = ["Net Operating Cash Flow Growth",
                            "Net Operating Cash Flow / Sales",
                            "Capital Expenditures Growth",
@@ -244,20 +262,32 @@ def process_financial_data(table,
                  "ESOP Guarantees - Preferred Stock"]
     list_columns = table.columns
     measure, currency = read_measure_currency(list_columns[0]) 
+
+    if type_data == "IS":
+        table[list_columns[0]] = table[list_columns[0]].replace("Interest Income", "Sales/Revenue")
+        table[list_columns[0]] = table[list_columns[0]].replace("Net Interest Income", "Gross Income")
+
     table[list_columns[0]] = table[list_columns[0]].replace(np.nan, "DELETE")
     #table[list_columns[0]] = table[list_columns[0]].replace("'", "")
     table[list_columns[0]] = table[list_columns[0]].apply(lambda x: "DELETE" if x.find("Growth") != -1 else x)
+    table[list_columns[0]] = table[list_columns[0]].apply(lambda x: "DELETE" if x.find("Growth") != -1 else x)
     table[list_columns[0]] = table[list_columns[0]].apply(lambda x: "DELETE" if x in drop_rows_balance_sheet else x)
     table[list_columns[0]] = table[list_columns[0]].apply(lambda x: "DELETE" if x in drop_rows_cash_flow else x)
+    table[list_columns[0]] = table[list_columns[0]].apply(lambda x: "DELETE" if x in drop_rows_income_statement else x)
     table = table.loc[table[list_columns[0]] != "DELETE"]
-    
+
     #3. format numeric columns 
     #print("step 3")       
     for item in list_columns[1:]:                
         table[item] = table[item].replace(np.nan, "0")
         table[item] = table[item] + measure
         table[item] = table[item].apply(clean_numeric_column)   
-           
+
+    if quarterly_data == False:
+        table["5YA"] = (table[list_columns[1]] + table[list_columns[2]] + table[list_columns[3]] + table[list_columns[4]] + table[list_columns[5]]) / 5
+        #table["05YA "] = table[list_columns[1]]
+        list_columns = table.columns
+
     #4. rename columns
     #print("step 4") 
     if quarterly_data == True:
@@ -273,6 +303,8 @@ def process_financial_data(table,
     else:
         list_columns = rename_yearly_column_name(list_columns)
         table.columns = list_columns
+    
+    #print(table)
 
     #5. correct data related to Income Statement
     #print("step 5")  
@@ -326,6 +358,7 @@ def get_financial_data_from_web(list_ticker,
             for item in tables:
                 if len(item) > 20:
                     df_indexes.append(index_table)
+                    #print(tables[index_table])
                 
                 index_table += 1
 
@@ -334,11 +367,25 @@ def get_financial_data_from_web(list_ticker,
                                                      type_data)
             
             if type_data == "BS":
-                table_ = tables[df_indexes[1]]
-                table_, currency, list_columns = process_financial_data(table_,
+                table_1 = tables[df_indexes[1]]
+                table_1, currency, list_columns = process_financial_data(table_1,
                                                 quarterly_data, 
                                                 type_data)
-                frames = [table, table_]
+                frames = [table, table_1]
+                table = pd.concat(frames)
+            elif type_data == "CF":
+                table_1 = tables[df_indexes[1]]
+                table_1, currency, list_columns = process_financial_data(table_1,
+                                                quarterly_data, 
+                                                type_data)
+                frames = [table, table_1]
+                table = pd.concat(frames)
+                
+                table_1 = tables[df_indexes[2]]
+                table_1, currency, list_columns = process_financial_data(table_1,
+                                                quarterly_data, 
+                                                type_data)
+                frames = [table, table_1]
                 table = pd.concat(frames)
             
             #table["Item  Item"] = table["Item  Item"].apply(lambda x: x[:round(len(x)/2)])
@@ -368,8 +415,9 @@ def get_financial_data_from_web(list_ticker,
     #stock_data["Value"] = stock_data["Value"].apply(clean_numeric_column)
     stock_data = stock_data.reset_index()
     stock_data = stock_data.drop(columns=["index"])
+    
+    #stock_data = stock_data.loc[stock_data[stock_data.columns[1]] == "5YA"]
     #print(stock_data)
-
     return stock_data, result
 
 
@@ -430,7 +478,7 @@ df_cash_flow_quarterly = pd.DataFrame()
 
 #list_tickers = get_ticker_list()
 list_ticker_agro = ["casagrc1", "cartavc1", "laredoc1"]
-list_ticker_industrial = ["cpacasc1", "unacemc1", "ferreyc1", "siderc1", "corarei1"]
+list_ticker_industrial = ["cpacasc1", "unacemc1", "ferreyc1", "siderc1", "corarei1"] 
 list_ticker_mining = ["poderc1", "cverdec1", "minsuri1", "scco"]
 list_ticker_massive = ["alicorc1", "backusi1", "inretc1"]
 list_ticker_utilities = ["lusurc1", "engepec1", "endispc1", "hidra2c1", "engiec1"]
