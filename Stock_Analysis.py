@@ -564,12 +564,12 @@ while (option != "X"):
     option = ""
     
     if (result == True):
-        load_database_snowflake("wtynwlj-nn04581",
-                                "PYTHON_USER",
-                                "Python2023",
+        load_database_snowflake("klmonwu-tm58546",
+                                "TEST_USER",
+                                "Test2023",
                                 "TEST_DB",
                                 "PUBLIC",
-                                "PYTHON_PROJECTS",
+                                "COMPUTE_WH",
                                 "ACCOUNTADMIN",
                                 df_total_data,
                                 table_name)

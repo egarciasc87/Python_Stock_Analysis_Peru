@@ -6,6 +6,16 @@ CREATE TABLE BVL_COMPANY
 )
 
 
+CREATE TABLE BVL_STOCK_PRICE
+(
+    STOCK CHAR(10),
+    DATE_PRICE DATE,
+    YEAR CHAR(4),
+    MONTH INT,
+    PRICE FLOAT    
+)
+
+
 CREATE TABLE BVL_INCOME_STATEMENT
 (
     STOCK CHAR(10),
@@ -49,11 +59,16 @@ AS
         A.VALUE AS SALES,
         GI.VALUE AS GROSS_INCOME,
         NI.VALUE AS NET_INCOME,
-        EB.VALUE AS EBITDA,
+        ifnull(EB.VALUE, 0) AS EBITDA,
         EPB.VALUE AS EPS_BASIC,
         EPD.VALUE AS EPS_DILUTED,
+        SHA.VALUE AS TOTAL_BASIC_SHARES,
         A.CURRENCY
     FROM BVL_INCOME_STATEMENT AS A
+
+        LEFT JOIN BVL_STOCK_PRICE AS PRI
+        ON PRI.STOCK=A.STOCK
+        AND PRI.YEAR=A.YEAR
     
         LEFT JOIN BVL_INCOME_STATEMENT AS GI
         ON GI.STOCK=A.STOCK
@@ -90,9 +105,16 @@ AS
         AND EPD.QUARTER=A.QUARTER
         AND EPD.CURRENCY=A.CURRENCY
         
+        LEFT JOIN BVL_INCOME_STATEMENT AS SHA
+        ON SHA.STOCK=A.STOCK
+        AND SHA.ITEM='Basic Shares Outstanding'
+        AND SHA.YEAR=A.YEAR
+        AND SHA.QUARTER=A.QUARTER
+        AND SHA.CURRENCY=A.CURRENCY
+        
     WHERE A.ITEM='Sales/Revenue';
 
-
+    
 CREATE VIEW V_BALANCE_SHEET
 AS
 
@@ -101,22 +123,22 @@ AS
         C.YEAR,
         C.QUARTER,
         C.CURRENCY,
-        C.VALUE AS TOTAL_CURRENT_ASSETS,
-        TA.VALUE AS TOTAL_ASSETS,
-        TCL.VALUE AS TOTAL_CURRENT_LIABILITIES,
-        TL.VALUE AS TOTAL_LIABILITIES,
-        CE.VALUE AS COMMON_EQUITY,
-        RE.VALUE AS RETAINED_EARNINGS,
-        TEQ.VALUE AS TOTAL_EQUITY,
-        NI.VALUE AS NET_INCOME
+        C.VALUE AS TOTAL_ASSETS,
+        ifnull(TCA.VALUE, 0) AS TOTAL_CURRENT_ASSETS,
+        ifnull(TCL.VALUE, 0) AS TOTAL_CURRENT_LIABILITIES,
+        ifnull(TL.VALUE, 0) AS TOTAL_LIABILITIES,
+        ifnull(CE.VALUE, 0) AS COMMON_EQUITY,
+        ifnull(RE.VALUE, 0) AS RETAINED_EARNINGS,
+        ifnull(TEQ.VALUE, 0) AS TOTAL_EQUITY,
+        ifnull(NI.VALUE, 0) AS NET_INCOME
     FROM BVL_BALANCE_SHEET AS C
     
-        LEFT JOIN BVL_BALANCE_SHEET AS TA
-        ON TA.STOCK=C.STOCK
-        AND TA.YEAR=C.YEAR
-        AND TA.QUARTER=C.QUARTER
-        AND TA.ITEM='Total Assets'
-        AND TA.CURRENCY=C.CURRENCY
+        LEFT JOIN BVL_BALANCE_SHEET AS TCA
+        ON TCA.STOCK=C.STOCK
+        AND TCA.YEAR=C.YEAR
+        AND TCA.QUARTER=C.QUARTER
+        AND TCA.ITEM='Total Current Assets'
+        AND TCA.CURRENCY=C.CURRENCY
         
         LEFT JOIN BVL_BALANCE_SHEET AS TCL
         ON TCL.STOCK=C.STOCK
@@ -160,9 +182,76 @@ AS
         AND NI.ITEM='Net Income'
         AND NI.CURRENCY=C.CURRENCY
     
-    WHERE C.ITEM='Total Current Assets';
+    WHERE C.ITEM='Total Assets';
 
 
+CREATE VIEW V_CASH_FLOW
+AS
+
+    SELECT
+        C.STOCK,
+        C.YEAR,
+        C.QUARTER,
+        C.CURRENCY,
+        C.VALUE AS NET_OPERATING_CASH_FLOW,
+        FIN.VALUE AS NET_FINANCING_CASH_FLOW,
+        INV.VALUE AS NET_INVESTING_CASH_FLOW,
+        FREE.VALUE AS FREE_CASH_FLOW,
+        NCH.VALUE AS NET_CHANGE_IN_CASH
+    FROM BVL_CASH_FLOW AS C
+    
+        LEFT JOIN BVL_CASH_FLOW AS FIN
+        ON FIN.STOCK=C.STOCK
+        AND FIN.YEAR=C.YEAR
+        AND FIN.QUARTER=C.QUARTER
+        AND FIN.ITEM='Net Financing Cash Flow'
+        AND FIN.CURRENCY=C.CURRENCY
+    
+        LEFT JOIN BVL_CASH_FLOW AS INV
+        ON INV.STOCK=C.STOCK
+        AND INV.YEAR=C.YEAR
+        AND INV.QUARTER=C.QUARTER
+        AND INV.ITEM='Net Investing Cash Flow'
+        AND INV.CURRENCY=C.CURRENCY
+    
+        LEFT JOIN BVL_CASH_FLOW AS FREE
+        ON FREE.STOCK=C.STOCK
+        AND FREE.YEAR=C.YEAR
+        AND FREE.QUARTER=C.QUARTER
+        AND FREE.ITEM='Free Cash Flow'
+        AND FREE.CURRENCY=C.CURRENCY
+    
+        LEFT JOIN BVL_CASH_FLOW AS NCH
+        ON NCH.STOCK=C.STOCK
+        AND NCH.YEAR=C.YEAR
+        AND NCH.QUARTER=C.QUARTER
+        AND NCH.ITEM='Net Change in Cash'
+        AND NCH.CURRENCY=C.CURRENCY	
+    
+    WHERE C.ITEM='Net Operating Cash Flow';
+
+
+CREATE VIEW V_STOCK_PRICE
+AS 
+
+    SELECT 
+        P.STOCK,
+        P.YEAR,
+        P.MONTH,
+        P.PRICE
+    FROM BVL_STOCK_PRICE AS P
+    
+        INNER JOIN (SELECT 
+                    A.STOCK,
+                    A.YEAR,
+                    MAX(A.MONTH) AS MONTH
+                FROM BVL_STOCK_PRICE AS A
+                GROUP BY A.STOCK, A.YEAR) AS M
+        ON M.STOCK=P.STOCK
+        AND M.YEAR=P.YEAR
+        AND M.MONTH=P.MONTH;
+
+        
 INSERT INTO BVL_COMPANY 
 VALUES ('CASAGRC1', 'AGRO'),
 ('CARTAVC1', 'AGRO'),
@@ -191,48 +280,54 @@ VALUES ('CASAGRC1', 'AGRO'),
 
 
 
-SELECT * FROM BVL_COMPANY
 
 SELECT * FROM BVL_INCOME_STATEMENT
-where LOWER(STOCK) IN ('minsuri1', 'scco', 'engiec1', 'inretc1', 'bap', 'ifs', 'scotiac1', 'bbvac1');
+WHERE ITEM NOT IN ('COGS excluding D&A', 'Depreciation', 'Amortization of Intangibles',
+    'SG&A Expense', 'Other SG&A', 'Other Operating Expense', 
+    'EBIT', 'Unusual Expense', 'Non Operating Income/Expense',
+    'Non-Operating Interest Income', 'Gross Interest Expense', 'Income Tax - Current Domestic',
+    'Income Tax - Deferred Domestic', 'Equity in Affiliates', 'Discontinued Operations',
+    'Net Income After Extraordinaries', 'Net Income Available to Common', 'Pretax Income',
+    'Extraordinaries & Discontinued Operations')
+//where LOWER(STOCK) IN ('minsuri1', 'scco', 'engiec1', 'inretc1', 'bap', 'ifs', 'scotiac1', 'bbvac1');
+
 
 select stock, count(*) as total 
-from bvl_income_statement
+from BVL_INCOME_STATEMENT
 group by stock
+order by stock
 
-
-SELECT * FROM BVL_INCOME_STATEMENT
-WHERE ITEM LIKE '%Growth%';
 
 SELECT * FROM V_INCOME_STATISTICS
 ORDER BY STOCK, YEAR, QUARTER;
 
 
 //delete FROM BVL_INCOME_STATEMENT
-//WHERE STOCK IN ('CASAGRC1', 'CARTAVC1', 'LAREDOC1')
+//WHERE STOCK IN ('BBVAC1', 'CREDITC1', 'SCOTIAC1', 'INTERBC1')
 
-
-SELECT A.*, B.CATEGORY FROM V_INCOME_STATISTICS AS A
-    LEFT JOIN BVL_COMPANY AS B
-    ON B.STOCK=A.STOCK
-ORDER BY B.CATEGORY
-
-
-SELECT * FROM BVL_BALANCE_SHEET
 
     
 
 SELECT * FROM BVL_BALANCE_SHEET
-WHERE upper(item)='TOTAL LIABILITIES'
+where stock='PODERC1'
 
 
 SELECT 
     STOCK, COUNT(*)
 FROM BVL_BALANCE_SHEET
 GROUP BY STOCK
+order by STOCK
 
-delete from BVL_CASH_FLOW
-WHERE STOCK IN ('CASAGRC1', 'CARTAVC1', 'LAREDOC1')
+
+SELECT * FROM V_BALANCE_SHEET
+ORDER BY STOCK, YEAR, QUARTER
+
+
+//DELETE FROM BVL_BALANCE_SHEET
+//WHERE STOCK=''
+
+//delete from BVL_CASH_FLOW
+//WHERE STOCK IN ('CASAGRC1', 'CARTAVC1', 'LAREDOC1')
 
 
 SELECT * FROM BVL_CASH_FLOW
@@ -243,4 +338,18 @@ FROM bvl_cash_flow
 GROUP BY STOCK
 
 
+SELECT * FROM V_CASH_FLOW
+WHERE STOCK='CASAGRC1'
+AND QUARTER IN (1,2,3,4)
+ORDER BY STOCK, YEAR, QUARTER
 
+
+//DELETE FROM BVL_CASH_FLOW
+
+
+SELECT * FROM V_STOCK_PRICE    
+ORDER BY STOCK, YEAR
+
+
+SELECT *
+FROM V_STOCK_PRICE 

@@ -111,9 +111,9 @@ df_final["Year"] = df_final["Year"].apply(lambda x: "TTM" if x == year_ttm else 
 #print(df_final)
 
 
-load_database_snowflake("wtynwlj-nn04581",
-                            "PYTHON_USER",
-                            "Python2023",
+load_database_snowflake("klmonwu-tm58546",
+                            "TEST_USER",
+                            "Test2023",
                             "TEST_DB",
                             "PUBLIC",
                             "PYTHON_PROJECTS",
