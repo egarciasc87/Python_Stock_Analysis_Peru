@@ -12,14 +12,15 @@ import requests
 from itertools import cycle
 from datetime import date
 from tqdm import tqdm
-import random
-import time
-import collections
-import os
-import pygsheets
+#import random
+#import time
+#import collections
+#import os
+#import pygsheets
 
 import snowflake.connector
-import json
+import psycopg2
+#import json
 
 
 pd.set_option('display.max_rows', None)
@@ -27,6 +28,26 @@ pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
 pd.set_option('display.max_colwidth', None)
 pd.options.display.float_format = '{:.2f}'.format
+
+def generate_insert_sql_script(df_temp):
+    script_temp = ""
+    total_rows = len(df_temp)
+    count = 1
+
+    script_temp = "INSERT INTO BVL_STOCK_PRICE VALUES "
+    
+    for index, row in df_temp.iterrows():
+        script_temp += " ('{}', '{}', '{}', {}, {})".format(row["Stock"], row["Date"], row["Year"], row["Month"], row["Price"])
+        #print(f"Generating script: row {count} out of {total_rows}")
+        
+        if (count == total_rows):
+            script_temp += ";"
+        else:
+            script_temp += ", "
+
+        count += 1
+
+    return script_temp
 
 
 ###--->>> Upload data to Snowflake
@@ -52,22 +73,32 @@ def load_database_snowflake(account,
     count = 1
 
     print("\nLoading data into Snowflake database: ")
-    script_temp = "INSERT INTO BVL_STOCK_PRICE VALUES "
-    
-    for index, row in df_temp.iterrows():
-        script_temp += " ('{}', '{}', '{}', {}, {})".format(row["Stock"], row["Date"], row["Year"], row["Month"], row["Price"])
-        #print(f"Generating script: row {count} out of {total_rows}")
-        
-        if (count == total_rows):
-            script_temp += ";"
-        else:
-            script_temp += ", "
-
-        count += 1
+    script_temp = generate_insert_sql_script(df_temp)
     
     print(f"Total rows: {total_rows}")
     #print(script_temp)
     conn.cursor().execute(script_temp)
+    print("Data successfully transfered into database...!!!")
+    conn.close()
+
+
+def load_database_postgressql(user,
+                            password,
+                            database,
+                            hostname,
+                            df_temp):
+    conn_string = "host='{}' dbname='{}' user='{}' password='{}'".format(hostname, database, user, password)
+    conn = psycopg2.connect(conn_string)
+    cursor = conn.cursor()
+    total_rows = len(df_temp)
+
+    print("\nLoading data into PstgresSQL database: ")
+    script_temp = generate_insert_sql_script(df_temp)
+    
+    print(f"Total rows: {total_rows}")
+    #print(script_temp)
+    cursor.execute(script_temp)
+    conn.commit()
     print("Data successfully transfered into database...!!!")
     conn.close()
 
@@ -111,13 +142,18 @@ df_final["Year"] = df_final["Year"].apply(lambda x: "TTM" if x == year_ttm else 
 #print(df_final)
 
 
-load_database_snowflake("klmonwu-tm58546",
+""" load_database_snowflake("klmonwu-tm58546",
                             "TEST_USER",
                             "Test2023",
                             "TEST_DB",
                             "PUBLIC",
                             "PYTHON_PROJECTS",
                             "ACCOUNTADMIN",
+                            df_final) """
+load_database_postgressql("postgres",
+                            "sql2023",
+                            "TEST_DB",
+                            "localhost",
                             df_final)
 
 

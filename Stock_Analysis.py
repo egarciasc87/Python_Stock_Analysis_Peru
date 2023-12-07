@@ -11,13 +11,14 @@ from itertools import cycle
 from datetime import date
 from tqdm import tqdm
 import random
-import time
-import collections
-import os
-import pygsheets
+#import time
+#import collections
+#import os
+#import pygsheets
 
+import psycopg2
 import snowflake.connector
-import json
+#import json
 
 
 
@@ -421,6 +422,29 @@ def get_financial_data_from_web(list_ticker,
     return stock_data, result
 
 
+def generate_insert_sql_script(df_temp,
+                               table_name):
+    script_temp = ""
+    total_rows = len(df_temp)
+    count = 1
+
+    script_temp = "INSERT INTO {} VALUES ".format(table_name)
+    
+    for index, row in df_temp.iterrows():
+        item_value = row["Item"].replace("'", "")
+        script_temp += " ('{}', '{}', '{}', '{}', {}, '{}')".format(row["Stock"], item_value, row["Year"], row["Quarter"], row["Value"], row["Currency"])
+        #print(f"Generating script: row {count} out of {total_rows}")
+        
+        if (count == total_rows):
+            script_temp += ";"
+        else:
+            script_temp += ", "
+
+        count += 1
+
+    return script_temp
+
+
 ###--->>> Upload data to Snowflake
 def load_database_snowflake(account,
                             user,
@@ -442,29 +466,41 @@ def load_database_snowflake(account,
     list_scripts = []
     script_temp = ""
     total_rows = len(df_temp)
-    count = 1
-
+    
     print("\nLoading data into Snowflake database: ")
-    script_temp = "INSERT INTO {} VALUES ".format(table_name)
-    
-    for index, row in df_temp.iterrows():
-        item_value = row["Item"].replace("'", "")
-        script_temp += " ('{}', '{}', '{}', '{}', {}, '{}')".format(row["Stock"], item_value, row["Year"], row["Quarter"], row["Value"], row["Currency"])
-        #print(f"Generating script: row {count} out of {total_rows}")
-        
-        if (count == total_rows):
-            script_temp += ";"
-        else:
-            script_temp += ", "
-
-        count += 1
-    
+    script_temp = generate_insert_sql_script(df_temp,
+                                             table_name)
+       
     print(f"Total rows: {total_rows}")
     #print(script_temp)
     conn.cursor().execute(script_temp)
     print("Data successfully transfered into database...!!!")
     conn.close()
 
+
+###--->>> Upload data to postgresSQL
+def load_database_postgressql(user,
+                            password,
+                            database,
+                            hostname,
+                            port,
+                            df_temp,
+                            table_name):
+    conn_string = "host='{}' dbname='{}' user='{}' password='{}'".format(hostname, database, user, password)
+    conn = psycopg2.connect(conn_string)
+    cursor = conn.cursor()
+    total_rows = len(df_temp)
+
+    print("\nLoading data into PstgresSQL database: ")
+    script_temp = generate_insert_sql_script(df_temp,
+                                            table_name)
+    
+    print(f"Total rows: {total_rows}")
+    #print(script_temp)
+    cursor.execute(script_temp)
+    conn.commit()
+    print("Data successfully transfered into database...!!!")
+    conn.close()
 
 
 ###--->>> Execution code
@@ -483,7 +519,9 @@ list_ticker_mining = ["poderc1", "cverdec1", "minsuri1", "scco"]
 list_ticker_massive = ["alicorc1", "backusi1", "inretc1"]
 list_ticker_utilities = ["lusurc1", "engepec1", "endispc1", "hidra2c1", "engiec1"]
 list_ticker_finance = ["creditc1", "interbc1", "scotiac1", "bbvac1"]
+list_full = list_ticker_agro + list_ticker_industrial + list_ticker_mining + list_ticker_massive + list_ticker_utilities + list_ticker_finance
 list_tickers = list_ticker_agro + list_ticker_industrial #+ list_ticker_mining + list_ticker_massive + list_ticker_energy
+
 #list_tickers = list_ticker_mining + list_ticker_massive
 #list_tickers = list_ticker_utilities
 #list_tickers = list_ticker_finance
@@ -493,7 +531,8 @@ dict_company_category = {"1": list_ticker_agro,
                          "3": list_ticker_mining,
                          "4": list_ticker_massive,
                          "5": list_ticker_utilities,
-                         "6": list_ticker_finance}
+                         "6": list_ticker_finance,
+                         "7": list_full}
 
 
 option = ""
@@ -507,6 +546,7 @@ while (option != "X"):
     print("[4] Massive Consumption")
     print("[5] Utilitiees")
     print("[6] Finance")
+    print("[7] All the categories")
     print("[X] Exit")
     option = input("Enter category: ")
 
@@ -564,7 +604,7 @@ while (option != "X"):
     option = ""
     
     if (result == True):
-        load_database_snowflake("klmonwu-tm58546",
+        """ load_database_snowflake("klmonwu-tm58546",
                                 "TEST_USER",
                                 "Test2023",
                                 "TEST_DB",
@@ -572,7 +612,14 @@ while (option != "X"):
                                 "COMPUTE_WH",
                                 "ACCOUNTADMIN",
                                 df_total_data,
-                                table_name)
+                                table_name) """
+        load_database_postgressql("postgres",
+                                  "sql2023",
+                                  "TEST_DB",
+                                  "localhost",
+                                  "5432",
+                                  df_total_data,
+                                  table_name)
 
 
     
